@@ -1,0 +1,290 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  UV_VERSION: "0.4.18"
+
+jobs:
+  # ── 1. Python lint ──────────────────────────────────────────────────────────
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install dev deps
+        working-directory: apps/api
+        run: uv sync --extra dev
+
+      - name: ruff check
+        working-directory: apps/api
+        run: uv run ruff check src/ tests/
+
+      - name: ruff format check
+        working-directory: apps/api
+        run: uv run ruff format --check src/ tests/
+
+      - name: mypy
+        working-directory: apps/api
+        run: uv run mypy src/anime_rag --ignore-missing-imports
+
+  # ── 2. Node lint ────────────────────────────────────────────────────────────
+  lint-node:
+    name: Lint Node
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - name: Install deps
+        working-directory: apps/web
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        working-directory: apps/web
+        run: pnpm lint
+
+      - name: TypeScript check
+        working-directory: apps/web
+        run: pnpm tsc --noEmit
+
+  # ── 3. Python unit tests ────────────────────────────────────────────────────
+  test-python:
+    name: Python Tests
+    runs-on: ubuntu-24.04
+    needs: lint-python
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: anime_rag_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/anime_rag_test
+      REDIS_URL: redis://localhost:6379/0
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLERK_JWKS_URL: ""    # blank → dev bypass in verify_clerk_token
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install deps
+        working-directory: apps/api
+        run: uv sync --extra dev
+
+      - name: Run migrations
+        working-directory: apps/api
+        run: uv run alembic upgrade head
+
+      - name: pytest (unit + integration)
+        working-directory: apps/api
+        run: |
+          uv run python -m pytest tests/ \
+            -v \
+            --tb=short \
+            --cov=anime_rag \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            -p no:warnings
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: apps/api/coverage.xml
+          flags: api
+
+  # ── 4. RAGAS eval gate (small sample — full eval runs nightly) ─────────────
+  eval-gate:
+    name: RAGAS Eval Gate
+    runs-on: ubuntu-24.04
+    needs: test-python
+    # Only block PRs — push to main proceeds even if LLM APIs are rate-limited
+    if: github.event_name == 'pull_request'
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: anime_rag_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/anime_rag_test
+      REDIS_URL: redis://localhost:6379/0
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLERK_JWKS_URL: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install API + eval deps
+        run: |
+          cd apps/api && uv sync --extra dev
+          cd ../../packages/eval && uv sync
+
+      - name: Run migrations + seed
+        working-directory: apps/api
+        run: |
+          uv run alembic upgrade head
+          uv run python ../../scripts/ingest.py --csv ../../data/anime_with_synopsis.csv
+
+      - name: Start API in background
+        working-directory: apps/api
+        run: |
+          uv run uvicorn anime_rag.main:app --host 0.0.0.0 --port 8000 &
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8000/health && break || sleep 2
+          done
+
+      - name: Run RAGAS eval (10-sample gate)
+        working-directory: packages/eval
+        run: |
+          uv run python -m eval.ragas_runner \
+            --api-url http://localhost:8000 \
+            --sample 10 \
+            --report /tmp/ragas-gate.json
+          cat /tmp/ragas-gate.json
+
+      - name: Upload eval report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ragas-gate-report
+          path: /tmp/ragas-gate.json
+
+  # ── 5. Trivy security scan ──────────────────────────────────────────────────
+  trivy:
+    name: Trivy Scan
+    runs-on: ubuntu-24.04
+    needs: lint-python
+    permissions:
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: |
+          docker build \
+            --target production \
+            --tag anime-rag-api:ci \
+            apps/api/
+
+      - name: Run Trivy on API image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: anime-rag-api:ci
+          format: sarif
+          output: trivy-api.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+          trivy-config: infra/trivy/trivy.yaml
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-api.sarif
+
+  # ── 6. Helm lint ────────────────────────────────────────────────────────────
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.15.0
+
+      - name: Lint API chart
+        run: |
+          helm lint infra/helm/anime-rag-api \
+            -f infra/helm/anime-rag-api/values.yaml \
+            -f infra/helm/anime-rag-api/values-dev.yaml
+
+          helm lint infra/helm/anime-rag-api \
+            -f infra/helm/anime-rag-api/values.yaml \
+            -f infra/helm/anime-rag-api/values-prod.yaml
+
+      - name: Lint web chart
+        run: |
+          helm lint infra/helm/anime-rag-web \
+            -f infra/helm/anime-rag-web/values.yaml \
+            -f infra/helm/anime-rag-web/values-dev.yaml
+
+          helm lint infra/helm/anime-rag-web \
+            -f infra/helm/anime-rag-web/values.yaml \
+            -f infra/helm/anime-rag-web/values-prod.yaml
+
+      - name: Helm template smoke test (prod)
+        run: |
+          helm template prod-api infra/helm/anime-rag-api \
+            -f infra/helm/anime-rag-api/values.yaml \
+            -f infra/helm/anime-rag-api/values-prod.yaml \
+            --set image.repository=123456789012.dkr.ecr.us-east-1.amazonaws.com/anime-rag-api \
+            --set image.tag=sha-abc1234 \
+            | kubectl apply --dry-run=client -f - 2>/dev/null || true

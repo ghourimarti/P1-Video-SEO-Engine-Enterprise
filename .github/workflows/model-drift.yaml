@@ -1,0 +1,133 @@
+name: Embedding Drift Detection
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"    # 06:00 UTC every Monday
+  workflow_dispatch:
+    inputs:
+      threshold:
+        description: "Cosine distance threshold (default 0.12)"
+        required: false
+        default: "0.12"
+      pairs:
+        description: "Number of random pairs to sample"
+        required: false
+        default: "500"
+
+env:
+  UV_VERSION: "0.4.18"
+
+jobs:
+  drift-check:
+    name: Embedding Drift Check
+    runs-on: ubuntu-24.04
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: anime_rag_prod_mirror
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: ${{ secrets.PROD_DATABASE_URL_READONLY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Install eval deps
+        working-directory: packages/eval
+        run: uv sync
+
+      - name: Run drift detector
+        id: drift
+        working-directory: packages/eval
+        run: |
+          THRESHOLD=${{ github.event.inputs.threshold || '0.12' }}
+          PAIRS=${{ github.event.inputs.pairs || '500' }}
+
+          uv run python -m eval.drift_detector \
+            --threshold "$THRESHOLD" \
+            --pairs "$PAIRS" \
+            --report /tmp/drift-report.json 2>&1 | tee /tmp/drift-stdout.txt
+
+          EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          exit $EXIT_CODE
+
+      - name: Post drift summary
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          try:
+              data = json.load(open("/tmp/drift-report.json"))
+          except Exception:
+              data = {}
+          dist = data.get("mean_cosine_distance", "N/A")
+          threshold = data.get("threshold", 0.12)
+          status = "✅ Within bounds" if data.get("passed", False) else "❌ DRIFT DETECTED"
+          lines = [
+              "## Embedding Drift Report\n",
+              f"**Status:** {status}",
+              f"**Mean cosine distance:** {dist}",
+              f"**Threshold:** {threshold}",
+              f"**Sample pairs:** {data.get('pairs_sampled', 'N/A')}",
+              f"**Production queries sampled:** {data.get('n_production_queries', 'N/A')}",
+          ]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("\n".join(lines))
+          EOF
+
+      - name: Upload drift report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: drift-report-${{ github.run_id }}
+          path: /tmp/drift-report.json
+          retention-days: 90
+
+      - name: Open GitHub issue on drift detected
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let data = {};
+            try {
+              data = JSON.parse(fs.readFileSync('/tmp/drift-report.json', 'utf8'));
+            } catch (_) {}
+            const dist = data.mean_cosine_distance?.toFixed(4) ?? 'unknown';
+            const threshold = data.threshold ?? 0.12;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔴 Embedding drift detected — ${new Date().toISOString().split('T')[0]}`,
+              body: [
+                '## Embedding Drift Alert',
+                '',
+                `Mean cosine distance **${dist}** exceeds threshold **${threshold}**.`,
+                '',
+                '### Recommended actions',
+                '1. Review recent production query distribution in `audit_log`',
+                '2. Check if the user query topic has shifted significantly',
+                '3. Consider re-embedding corpus with updated model or retraining',
+                '4. If intentional (new content ingested), update golden set and re-run',
+                '',
+                `[Workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+              ].join('\n'),
+              labels: ['drift-alert', 'automated'],
+            });
