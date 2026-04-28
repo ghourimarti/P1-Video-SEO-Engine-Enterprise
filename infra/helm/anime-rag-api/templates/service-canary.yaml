@@ -1,0 +1,18 @@
+{{- if .Values.rollout.enabled }}
+# Canary service — Argo Rollouts shifts traffic between stable and this service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "anime-rag-api.fullname" . }}-canary
+  labels:
+    {{- include "anime-rag-api.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "anime-rag-api.selectorLabels" . | nindent 4 }}
+{{- end }}

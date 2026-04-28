@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dev-api
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    env: dev
+    component: api
+spec:
+  project: anime-rag
+
+  source:
+    repoURL: https://github.com/ghourimarti/P1-Video-SEO-Engine-Enterprise.git
+    targetRevision: main
+    path: infra/helm/anime-rag-api
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+      # Image tag injected by CI via --helm-set image.tag=$SHA
+      parameters:
+        - name: image.repository
+          value: ""    # replaced by CD workflow
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: anime-rag-dev
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 3m

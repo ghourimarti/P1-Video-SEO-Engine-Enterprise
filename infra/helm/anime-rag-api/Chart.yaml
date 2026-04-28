@@ -1,0 +1,12 @@
+apiVersion: v2
+name: anime-rag-api
+description: FastAPI + LangGraph RAG backend for the Anime Recommender
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - rag
+  - llm
+  - fastapi
+maintainers:
+  - name: anime-rag-team

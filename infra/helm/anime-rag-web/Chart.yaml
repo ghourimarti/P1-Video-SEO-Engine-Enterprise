@@ -1,0 +1,11 @@
+apiVersion: v2
+name: anime-rag-web
+description: Next.js 15 frontend for the Anime Recommender
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - nextjs
+  - frontend
+maintainers:
+  - name: anime-rag-team

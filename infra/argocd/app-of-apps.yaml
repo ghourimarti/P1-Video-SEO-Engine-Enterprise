@@ -1,0 +1,27 @@
+# Root "app of apps" — ArgoCD watches this file and reconciles all child Applications.
+# Deploy once: kubectl apply -f infra/argocd/app-of-apps.yaml -n argocd
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: anime-rag-apps
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: anime-rag
+
+  source:
+    repoURL: https://github.com/ghourimarti/P1-Video-SEO-Engine-Enterprise.git
+    targetRevision: main
+    path: infra/argocd/apps
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

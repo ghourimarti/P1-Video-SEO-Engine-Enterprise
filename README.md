@@ -36,7 +36,7 @@
 | M8 | Testing + RAGAS golden eval (100 samples) + Promptfoo + k6 | ✅ Done |
 | M9 | Multi-stage Dockerfiles (non-root, layer-cached, trivy scan) | ✅ Done |
 | M10 | Terraform + Terragrunt IaC (EKS, RDS, ElastiCache, ECR, IAM) | ✅ Done |
-| M11 | Helm charts + ArgoCD app-of-apps + Argo Rollouts canary | 🔜 |
+| M11 | Helm charts + ArgoCD app-of-apps + Argo Rollouts canary | ✅ Done |
 | M12 | GitHub Actions CI/CD (lint → test → eval gate → deploy) | 🔜 |
 | M13 | Cost controls (token budgets, model routing, kill switch) | 🔜 |
 | M14 | Scale validation (k6 ramp, SLOs, PgBouncer, runbooks) | 🔜 |

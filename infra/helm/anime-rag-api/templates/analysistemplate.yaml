@@ -1,0 +1,48 @@
+{{- if .Values.rollout.enabled }}
+# AnalysisTemplate — queried by Argo Rollouts at each canary analysis step.
+# Gate criteria: p95 latency < 15 s AND error rate < 1 %.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: api-success-rate
+  labels:
+    {{- include "anime-rag-api.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: service
+      value: {{ include "anime-rag-api.fullname" . }}-canary
+  metrics:
+    - name: p95-latency
+      interval: 1m
+      count: 3
+      successCondition: result[0] < 15
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+          query: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{
+                service="{{ "{{" }}args.service{{ "}}" }}"
+              }[2m])) by (le)
+            )
+
+    - name: error-rate
+      interval: 1m
+      count: 3
+      # Pass when error rate < 1 % (i.e. success rate > 99 %)
+      successCondition: result[0] < 0.01
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus-operated.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{
+              service="{{ "{{" }}args.service{{ "}}" }}",
+              status=~"5.."
+            }[2m]))
+            /
+            sum(rate(http_requests_total{
+              service="{{ "{{" }}args.service{{ "}}" }}"
+            }[2m]))
+{{- end }}

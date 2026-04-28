@@ -1,0 +1,31 @@
+replicaCount: 1
+
+image:
+  repository: ""    # CI fills
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+
+pdb:
+  enabled: false
+
+ingress:
+  hosts:
+    - host: dev.anime-rag.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+env:
+  NEXT_PUBLIC_API_URL: "https://api.dev.anime-rag.example.com"
+  NODE_ENV: "development"
+
+nodeSelector: {}

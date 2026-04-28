@@ -1,0 +1,48 @@
+# ArgoCD AppProject — scopes what this project can deploy and where.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: anime-rag
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Anime RAG enterprise production system
+
+  # Source repos allowed
+  sourceRepos:
+    - "https://github.com/ghourimarti/P1-Video-SEO-Engine-Enterprise.git"
+    - "https://charts.helm.sh/stable"
+
+  # Target clusters + namespaces
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: anime-rag-dev
+    - server: https://kubernetes.default.svc
+      namespace: anime-rag-prod
+    - server: https://kubernetes.default.svc
+      namespace: argocd
+
+  # Permitted resource kinds
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: argoproj.io
+      kind: Application
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+
+  # Sync policy
+  syncPolicy:
+    automated: {}
+
+  roles:
+    - name: developer
+      description: Read-only access for developers
+      policies:
+        - p, proj:anime-rag:developer, applications, get, anime-rag/*, allow
+        - p, proj:anime-rag:developer, applications, sync, anime-rag/dev-*, allow
+      groups:
+        - anime-rag:developers

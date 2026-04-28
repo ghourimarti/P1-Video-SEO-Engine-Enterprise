@@ -1,0 +1,50 @@
+replicaCount: 2
+
+image:
+  repository: ""    # CI fills: <account>.dkr.ecr.us-east-1.amazonaws.com/anime-rag/prod/api
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 60
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+ingress:
+  annotations:
+    alb.ingress.kubernetes.io/certificate-arn: ""   # ACM cert ARN
+    alb.ingress.kubernetes.io/wafv2-acl-arn: ""     # WAF ACL ARN
+  hosts:
+    - host: api.anime-rag.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: ""   # CI fills from terraform output
+
+externalSecret:
+  remoteRef:
+    key: anime-rag/prod/api/secrets
+
+env:
+  LOG_LEVEL: "INFO"
+  WORKERS: "4"
+
+rollout:
+  enabled: true
+
+nodeSelector:
+  node.kubernetes.io/purpose: system

@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prod-api
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    env: prod
+    component: api
+  annotations:
+    # Disable auto-sync in prod — CD workflow calls argocd app sync explicitly
+    # after the eval gate passes.
+    argocd.argoproj.io/sync-policy: "none"
+spec:
+  project: anime-rag
+
+  source:
+    repoURL: https://github.com/ghourimarti/P1-Video-SEO-Engine-Enterprise.git
+    targetRevision: main
+    path: infra/helm/anime-rag-api
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+      parameters:
+        - name: image.repository
+          value: ""    # replaced by CD workflow
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: anime-rag-prod
+
+  syncPolicy:
+    # Manual sync only in prod — triggered by CD after eval gate passes
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 2
+      backoff:
+        duration: 60s
+        factor: 2
+        maxDuration: 5m
