@@ -1,18 +1,20 @@
 """Hybrid retrieval node: dense + BM25 → RRF merge → Cohere rerank.
 
-M4: reuses query_embedding from state when the rewriter did not change
-the query, avoiding a redundant OpenAI embedding API call.
+M4: reuses query_embedding from state when the rewriter did not change the query.
+M5: records retrieval duration + doc count to Prometheus.
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 
 import numpy as np
 import structlog
 from langchain_openai import OpenAIEmbeddings
 from psycopg_pool import AsyncConnectionPool
 
+from anime_rag.core.metrics import rag_retrieval_duration_seconds, rag_retrieved_docs_count
 from anime_rag.core.settings import Settings
 from anime_rag.rag.state import RAGState
 from anime_rag.rag.retrieval.dense import retrieve_dense
@@ -28,13 +30,12 @@ def make_retriever(
     embedder: OpenAIEmbeddings,
     settings: Settings,
 ):
-    """Return a LangGraph node that performs hybrid retrieval."""
-
     async def retrieve(state: RAGState) -> dict:
         query = state.get("rewritten_query") or state["query"]
         top_k = settings.retrieval_top_k
+        t_start = time.perf_counter()
 
-        # ── 1. Embed query (reuse pre-computed embedding when query unchanged) ──
+        # ── 1. Embed (reuse pre-computed if query unchanged) ──────────────────
         original_query = state["query"]
         precomputed = state.get("query_embedding")
 
@@ -54,28 +55,26 @@ def make_retriever(
             retrieve_bm25(pool, query, top_k),
         )
 
-        log.debug(
-            "retrieval_raw",
-            dense_n=len(dense_docs),
-            bm25_n=len(bm25_docs),
-            query=query[:60],
-        )
+        log.debug("retrieval_raw", dense_n=len(dense_docs), bm25_n=len(bm25_docs))
 
         # ── 3. RRF merge ──────────────────────────────────────────────────────
-        dense_ids = [d["mal_id"] for d in dense_docs]
-        bm25_ids  = [d["mal_id"] for d in bm25_docs]
-        rrf_scores = reciprocal_rank_fusion([dense_ids, bm25_ids], k=settings.rrf_k)
+        rrf_scores = reciprocal_rank_fusion(
+            [[d["mal_id"] for d in dense_docs], [d["mal_id"] for d in bm25_docs]],
+            k=settings.rrf_k,
+        )
         merged = merge_results([dense_docs, bm25_docs], rrf_scores)
 
-        log.debug("rrf_merged", merged_n=len(merged))
+        # ── 4. Cohere rerank ──────────────────────────────────────────────────
+        reranked = await cohere_rerank(query, merged[:top_k], settings)
 
-        # ── 4. Cohere rerank ─────────────────────────────────────────────────
-        candidates = merged[:top_k]
-        reranked = await cohere_rerank(query, candidates, settings)
+        elapsed = time.perf_counter() - t_start
+        rag_retrieval_duration_seconds.observe(elapsed)
+        rag_retrieved_docs_count.observe(len(reranked))
 
         log.info(
             "retrieval_complete",
             reranked_n=len(reranked),
+            duration_s=round(elapsed, 3),
             top_score=reranked[0]["similarity"] if reranked else 0,
         )
 

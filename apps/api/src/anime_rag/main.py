@@ -1,7 +1,9 @@
-"""FastAPI application entry point."""
+"""FastAPI application entry point — observability wired at startup."""
 
+import os
 from contextlib import asynccontextmanager
 
+import litellm
 import redis.asyncio as aioredis
 import structlog
 from fastapi import FastAPI
@@ -13,15 +15,19 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from anime_rag.cache.service import CacheService
+from anime_rag.core.logging import RequestContextMiddleware, setup_logging
 from anime_rag.core.settings import get_settings
+from anime_rag.core.telemetry import setup_telemetry
 from anime_rag.db.pool import create_pool, close_pool
 from anime_rag.rag.pipeline import RAGPipeline
 from anime_rag.routers import health, recommend
 
-log = structlog.get_logger(__name__)
 settings = get_settings()
 
-# Redis-backed rate limiter — falls back to in-memory if Redis is down
+# ── Logging must be configured before first log call ─────────────────────────
+setup_logging(log_level=settings.log_level, environment=settings.environment)
+log = structlog.get_logger(__name__)
+
 limiter = Limiter(
     key_func=get_remote_address,
     storage_uri=settings.redis_url,
@@ -29,36 +35,52 @@ limiter = Limiter(
 )
 
 
+def _setup_langfuse(settings) -> None:
+    """Configure LiteLLM → Langfuse callback for automatic LLM tracing."""
+    if not settings.langfuse_public_key or not settings.langfuse_secret_key:
+        log.info("langfuse_skipped", reason="keys not configured")
+        return
+    os.environ["LANGFUSE_PUBLIC_KEY"] = settings.langfuse_public_key
+    os.environ["LANGFUSE_SECRET_KEY"] = settings.langfuse_secret_key
+    os.environ["LANGFUSE_HOST"]       = settings.langfuse_host
+    litellm.success_callback = ["langfuse"]
+    litellm.failure_callback = ["langfuse"]
+    log.info("langfuse_configured", host=settings.langfuse_host)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("startup", environment=settings.environment)
+    log.info("startup", environment=settings.environment, version="0.5.0")
+
+    # ── OpenTelemetry ─────────────────────────────────────────────────────────
+    setup_telemetry(
+        app=app,
+        service_name=settings.otel_service_name,
+        otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+    )
+
+    # ── Langfuse LLM tracing ──────────────────────────────────────────────────
+    _setup_langfuse(settings)
 
     # ── DB pool ───────────────────────────────────────────────────────────────
     app.state.db_pool = await create_pool(settings)
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     app.state.redis = aioredis.from_url(
-        settings.redis_url,
-        encoding="utf-8",
-        decode_responses=True,
+        settings.redis_url, encoding="utf-8", decode_responses=True
     )
-    # Verify connection
     try:
         await app.state.redis.ping()
-        log.info("redis_connected", url=settings.redis_url)
+        log.info("redis_connected")
     except Exception as exc:
         log.warning("redis_unavailable", error=str(exc))
 
-    # ── Cache service ─────────────────────────────────────────────────────────
+    # ── Cache + Embedder + Pipeline ───────────────────────────────────────────
     app.state.cache = CacheService(app.state.redis, settings)
-
-    # ── Embedder ──────────────────────────────────────────────────────────────
     app.state.embedder = OpenAIEmbeddings(
         model=settings.embedding_model,
         openai_api_key=settings.openai_api_key or None,
     )
-
-    # ── RAG pipeline ──────────────────────────────────────────────────────────
     app.state.pipeline = RAGPipeline(
         pool=app.state.db_pool,
         embedder=app.state.embedder,
@@ -69,7 +91,6 @@ async def lifespan(app: FastAPI):
     log.info("startup_complete")
     yield
 
-    # ── Cleanup ───────────────────────────────────────────────────────────────
     await close_pool(app.state.db_pool)
     await app.state.redis.aclose()
     log.info("shutdown_complete")
@@ -77,14 +98,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Anime RAG API",
-    description="Production-grade RAG for anime recommendations.",
-    version="0.4.0",
+    version="0.5.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
 )
 
-# ── Middleware ────────────────────────────────────────────────────────────────
+# ── Middleware (order matters: outermost first) ───────────────────────────────
+app.add_middleware(RequestContextMiddleware)   # structlog request_id binding
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:3001"],

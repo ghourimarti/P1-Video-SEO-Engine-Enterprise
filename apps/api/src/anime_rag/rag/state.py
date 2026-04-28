@@ -11,7 +11,7 @@ class AnimeDoc(TypedDict):
     score: Optional[float]
     genres: list[str]
     synopsis: str
-    similarity: float        # RRF score → Cohere relevance score after rerank
+    similarity: float
     cohere_score: Optional[float]
 
 
@@ -19,6 +19,7 @@ class RAGState(TypedDict):
     # ── Input ─────────────────────────────────────────────────────────────────
     query: str
     top_n: int
+    trace_id: Optional[str]          # propagated from HTTP request for Langfuse correlation
 
     # ── Embedding (computed once in cache_check, reused in retriever) ─────────
     query_embedding: Optional[list[float]]
@@ -27,6 +28,7 @@ class RAGState(TypedDict):
     rewritten_query: str
     documents: list[AnimeDoc]
     grader_passed: bool
+    cache_tier: Optional[str]        # "exact" | "semantic" | None
 
     # ── Output ───────────────────────────────────────────────────────────────
     answer: str
