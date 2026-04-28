@@ -7,10 +7,18 @@ dependencies = [
     "ragas>=0.1.9",
     "datasets>=2.20.0",
     "pandas>=2.2.0",
+    "numpy>=1.26.0",
     "langchain>=0.3.0",
     "langchain-openai>=0.2.0",
+    "psycopg[binary]>=3.1.0",
+    "requests>=2.32.0",
+    "structlog>=24.2.0",
     "python-dotenv>=1.0.0",
 ]
+
+[project.scripts]
+run-eval  = "eval.ragas_runner:main"
+run-drift = "eval.drift_detector:main"
 
 [build-system]
 requires = ["hatchling"]

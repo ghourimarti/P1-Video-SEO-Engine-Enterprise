@@ -28,12 +28,12 @@
 | M0 | Clean up original repo (remove blobs, add .env.example) | ✅ Done |
 | M1 | Project scaffold (this repo) | ✅ Done |
 | M2 | FastAPI backend + LangGraph RAG pipeline + pgvector ingestion + Alembic | ✅ Done |
-| M3 | Hybrid retrieval (BM25 + dense + RRF + Cohere reranker + query rewrite) | 🔜 |
-| M4 | Redis semantic cache + Docker Compose full stack | 🔜 |
-| M5 | structlog + OpenTelemetry + Langfuse self-hosted | 🔜 |
-| M6 | Next.js frontend + Clerk + SSE streaming + citations UI | 🔜 |
-| M7 | Security layer (JWT, rate limiting, PII detection, prompt injection, audit log) | 🔜 |
-| M8 | Testing + RAGAS golden eval (100 samples) + Promptfoo + k6 | 🔜 |
+| M3 | Hybrid retrieval (BM25 + dense + RRF + Cohere reranker + query rewrite) | ✅ Done |
+| M4 | Redis semantic cache + Docker Compose full stack | ✅ Done |
+| M5 | structlog + OpenTelemetry + Langfuse self-hosted + Prometheus/Grafana | ✅ Done |
+| M6 | Next.js frontend + Clerk + SSE streaming + citations UI | ✅ Done |
+| M7 | Security layer (JWT, rate limiting, PII detection, prompt injection, audit log) | ✅ Done |
+| M8 | Testing + RAGAS golden eval (100 samples) + Promptfoo + k6 | 🔄 In Progress |
 | M9 | Multi-stage Dockerfiles (non-root, layer-cached, trivy scan) | 🔜 |
 | M10 | Terraform + Terragrunt IaC (EKS, RDS, ElastiCache, ECR, IAM) | 🔜 |
 | M11 | Helm charts + ArgoCD app-of-apps + Argo Rollouts canary | 🔜 |

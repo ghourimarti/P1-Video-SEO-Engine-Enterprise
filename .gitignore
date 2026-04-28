@@ -69,3 +69,11 @@ coverage.xml
 
 # k6
 results/
+load_report.json
+
+# Promptfoo
+.promptfoo/
+
+# Eval reports
+eval_report.json
+drift_report.json
