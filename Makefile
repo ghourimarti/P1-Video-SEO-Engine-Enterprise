@@ -1,4 +1,4 @@
-.PHONY: help install up down build logs lint test eval load-test seed tf-plan helm-lint
+.PHONY: help install up down build logs lint test eval load-test seed tf-plan helm-lint alembic-upgrade alembic-revision
 
 PYTHON     := uv run python
 API_DIR    := apps/api
@@ -53,6 +53,12 @@ eval: ## Run RAGAS offline eval
 
 load-test: ## k6 load test (requires running stack)
 	k6 run scripts/load_test/smoke.js
+
+alembic-upgrade: ## Run Alembic migrations (requires running Postgres)
+	cd $(API_DIR) && uv run alembic upgrade head
+
+alembic-revision: ## Create a new Alembic migration (MSG="description")
+	cd $(API_DIR) && uv run alembic revision --autogenerate -m "$(MSG)"
 
 tf-plan: ## Terraform plan (dev env, no apply)
 	cd infra/terraform && terragrunt run-all plan --terragrunt-working-dir envs/dev
