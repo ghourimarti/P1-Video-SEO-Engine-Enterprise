@@ -7,6 +7,7 @@ class Source(BaseModel):
     score: float | None = None
     genres: list[str] = []
     relevance_score: float | None = None
+    cited: bool = False        # True if the title appears verbatim in the answer
 
 
 class RecommendRequest(BaseModel):
