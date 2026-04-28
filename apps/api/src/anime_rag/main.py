@@ -2,11 +2,12 @@
 
 import os
 from contextlib import asynccontextmanager
+from typing import Callable
 
 import litellm
 import redis.asyncio as aioredis
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import OpenAIEmbeddings
 from prometheus_client import make_asgi_app
@@ -105,14 +106,34 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Security headers middleware ────────────────────────────────────────────────
+# Applied to every response. Values are safe defaults; tighten CSP in prod.
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options":  "nosniff",
+    "X-Frame-Options":          "DENY",
+    "X-XSS-Protection":         "1; mode=block",
+    "Referrer-Policy":          "strict-origin-when-cross-origin",
+    "Permissions-Policy":       "geolocation=(), microphone=(), camera=()",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",  # HTTPS only
+}
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next: Callable) -> Response:
+    response = await call_next(request)
+    for header, value in _SECURITY_HEADERS.items():
+        response.headers[header] = value
+    return response
+
+
 # ── Middleware (order matters: outermost first) ───────────────────────────────
 app.add_middleware(RequestContextMiddleware)   # structlog request_id binding
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

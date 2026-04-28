@@ -1,6 +1,7 @@
-.PHONY: help install up down build logs lint test eval load-test load-test-smoke \
+.PHONY: help install up down build logs lint test eval load-test load-test-smoke load-test-slo \
         seed tf-plan helm-lint alembic-upgrade alembic-revision \
-        trivy-scan trivy-scan-api trivy-scan-web drift-check promptfoo
+        trivy-scan trivy-scan-api trivy-scan-web drift-check promptfoo \
+        kill-switch-on kill-switch-off cost-summary pgbouncer-up
 
 PYTHON     := uv run python
 API_DIR    := apps/api
@@ -103,3 +104,29 @@ drift-check: ## Check embedding drift between golden set and recent audit_log qu
 
 promptfoo: ## Run Promptfoo prompt regression suite (requires npx)
 	npx promptfoo eval --config promptfoo.yaml
+
+load-test-slo: ## k6 SLO validation (3 scenarios, hard thresholds, writes slo_report.json)
+	k6 run --out json=slo_raw.json scripts/load_test/slo-validation.js
+
+# ── Cost controls ──────────────────────────────────────────────────────────────
+
+API_URL ?= http://localhost:8000
+
+kill-switch-on: ## Activate kill switch — all LLM calls routed to cheap model
+	curl -sf -X POST $(API_URL)/api/v1/admin/cost/kill-switch \
+	  -H "Content-Type: application/json" \
+	  -d '{"active":true,"reason":"manual activation"}' | jq .
+
+kill-switch-off: ## Deactivate kill switch — resume normal model routing
+	curl -sf -X POST $(API_URL)/api/v1/admin/cost/kill-switch \
+	  -H "Content-Type: application/json" \
+	  -d '{"active":false,"reason":"manual deactivation"}' | jq .
+
+cost-summary: ## Print today's cost summary from audit_log
+	curl -sf $(API_URL)/api/v1/admin/cost/summary | jq .
+
+# ── PgBouncer ──────────────────────────────────────────────────────────────────
+
+pgbouncer-up: ## Start PgBouncer connection pool alongside postgres
+	docker compose --profile pgbouncer up -d pgbouncer
+	@echo "PgBouncer → localhost:5433 (routing to postgres:5432)"

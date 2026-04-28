@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = "http://localhost:4317"
     otel_service_name: str = "anime-rag-api"
 
+    # ── CORS ─────────────────────────────────────────────────────────────────
+    # Comma-separated origins; prod should list the exact frontend domain.
+    allowed_origins: str = "http://localhost:3000,http://localhost:3001"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
     # ── Rate limiting ─────────────────────────────────────────────────────────
     rate_limit_per_minute: int = 30
     rate_limit_burst: int = 10
