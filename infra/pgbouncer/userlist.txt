@@ -1,0 +1,9 @@
+# PgBouncer userlist — passwords are MD5-hashed (md5 + password + username).
+# In production, generate with:
+#   echo -n "md5$(echo -n '<password><username>' | md5sum | awk '{print $1}')"
+# Then inject via ESO from AWS Secrets Manager and mount as a secret volume.
+#
+# Placeholder hashes below are for local development only (password = "dev_password").
+"anime_rag"         "md5c0b5a9e7f3d6b2a8e1c4f9d7b0e5a3f2"
+"pgbouncer_admin"   "md5a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+"pgbouncer_stats"   "md5f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1"

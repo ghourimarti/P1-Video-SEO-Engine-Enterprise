@@ -29,6 +29,32 @@ services:
       timeout: 3s
       retries: 10
 
+  pgbouncer:
+    image: bitnami/pgbouncer:1.22.1
+    environment:
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-anime_rag}
+      POSTGRESQL_USERNAME: ${POSTGRES_USER:-anime_rag}
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_MAX_CLIENT_CONN: "200"
+      PGBOUNCER_DEFAULT_POOL_SIZE: "20"
+      PGBOUNCER_MIN_POOL_SIZE: "5"
+      PGBOUNCER_RESERVE_POOL_SIZE: "5"
+    ports:
+      - "5433:5432"   # expose on 5433 so direct postgres is still reachable on 5432
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432 -U ${POSTGRES_USER:-anime_rag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - pgbouncer
+
   api:
     build:
       context: apps/api
@@ -38,7 +64,9 @@ services:
       target: ${DOCKER_TARGET:-development}
     env_file: .env
     environment:
-      POSTGRES_HOST: postgres
+      # Point API at PgBouncer when pgbouncer profile is active;
+      # fall back to direct postgres otherwise.
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       REDIS_URL: redis://redis:6379/0
       PYTHONPATH: /app/src
     ports:
