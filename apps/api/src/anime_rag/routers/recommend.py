@@ -26,7 +26,7 @@ tracer = trace.get_tracer(__name__)
 async def recommend(request: Request, body: RecommendRequest):
     pipeline: RAGPipeline = request.app.state.pipeline
     trace_id = str(uuid.uuid4())
-    t_start = time.perf_counter()
+    t_start  = time.perf_counter()
 
     structlog.contextvars.bind_contextvars(trace_id=trace_id)
     log.info("recommend_start", query=body.query[:80], top_n=body.top_n)
@@ -80,17 +80,36 @@ async def recommend(request: Request, body: RecommendRequest):
 
 @router.post("/recommend/stream")
 async def recommend_stream(request: Request, body: RecommendRequest):
+    """
+    Server-Sent Events stream.
+
+    Event types (JSON payload in `data:` field):
+      {"type": "step",   "step": "retrieving"|"rewriting"|...}
+      {"type": "token",  "content": "..."}
+      {"type": "done",   "sources": [...], "model_used": "...", "cost_usd": 0.002,
+                         "input_tokens": 123, "output_tokens": 456, "cached": false}
+      data: [DONE]   ← final sentinel
+    """
     pipeline: RAGPipeline = request.app.state.pipeline
     trace_id = str(uuid.uuid4())
 
+    structlog.contextvars.bind_contextvars(trace_id=trace_id)
+    log.info("stream_start", query=body.query[:80], top_n=body.top_n)
+
     async def event_stream():
-        async for chunk in pipeline.run_stream(
-            query=body.query, top_n=body.top_n, trace_id=trace_id
-        ):
-            for node_name, update in chunk.items():
-                payload = {"node": node_name, "data": update, "trace_id": trace_id}
+        try:
+            async for event in pipeline.run_stream(
+                query=body.query, top_n=body.top_n, trace_id=trace_id
+            ):
+                payload = {**event, "trace_id": trace_id}
                 yield f"data: {json.dumps(payload, default=str)}\n\n"
-        yield "data: [DONE]\n\n"
+        except Exception as exc:
+            rag_errors_total.labels(error_type=type(exc).__name__).inc()
+            log.error("stream_error", error=str(exc))
+            error_payload = {"type": "error", "message": str(exc), "trace_id": trace_id}
+            yield f"data: {json.dumps(error_payload)}\n\n"
+        finally:
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(
         event_stream(),

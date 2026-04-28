@@ -8,15 +8,10 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from anime_rag.core.metrics import rag_tokens_total, rag_cost_usd_total
 from anime_rag.core.settings import Settings
-from anime_rag.rag.state import AnimeDoc, RAGState
+from anime_rag.rag.state import RAGState
+from anime_rag.rag.utils import docs_to_context, extract_citations, estimate_cost, build_sources
 
 log = structlog.get_logger(__name__)
-
-_PRICING: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-6":           {"input": 3.00,  "output": 15.00},
-    "claude-haiku-4-5-20251001":   {"input": 0.25,  "output": 1.25},
-    "groq/llama-3.1-8b-instant":   {"input": 0.05,  "output": 0.08},
-}
 
 _SYSTEM = """\
 You are an expert anime recommendation assistant. Using ONLY the anime listed
@@ -37,29 +32,6 @@ My preferences: {query}
 Give me your top {top_n} recommendations."""
 
 
-def _docs_to_context(docs: list[AnimeDoc]) -> str:
-    parts = []
-    for d in docs:
-        genres   = ", ".join(d["genres"]) if d["genres"] else "N/A"
-        score_str = f"{d['score']:.1f}" if d.get("score") else "N/A"
-        parts.append(
-            f"Title: {d['name']}\n"
-            f"Score: {score_str}  Genres: {genres}\n"
-            f"Synopsis: {d['synopsis']}"
-        )
-    return "\n\n---\n\n".join(parts)
-
-
-def _extract_citations(answer: str, docs: list[AnimeDoc]) -> set[int]:
-    lower = answer.lower()
-    return {d["mal_id"] for d in docs if d["name"].lower() in lower}
-
-
-def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    p = _PRICING.get(model, {"input": 1.0, "output": 1.0})
-    return (input_tokens * p["input"] + output_tokens * p["output"]) / 1_000_000
-
-
 def make_generator(settings: Settings):
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10), reraise=True)
@@ -69,7 +41,7 @@ def make_generator(settings: Settings):
             messages=messages,
             max_tokens=max_tokens,
             temperature=0.3,
-            metadata=metadata,   # sent to Langfuse via success_callback
+            metadata=metadata,
         )
 
     async def generate(state: RAGState) -> dict:
@@ -91,17 +63,16 @@ def make_generator(settings: Settings):
                 "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "cached": False,
             }
 
-        query  = state.get("rewritten_query") or state["query"]
-        top_n  = state.get("top_n", 5)
+        query = state.get("rewritten_query") or state["query"]
+        top_n = state.get("top_n", 5)
 
         messages = [
             {"role": "system", "content": _SYSTEM.format(top_n=top_n)},
             {"role": "user",   "content": _HUMAN.format(
-                context=_docs_to_context(docs), query=query, top_n=top_n
+                context=docs_to_context(docs), query=query, top_n=top_n
             )},
         ]
 
-        # Langfuse metadata — correlates this generation with the HTTP trace
         lf_metadata = {
             "generation_name": "anime-recommend",
             "prompt_version":  "v1",
@@ -120,25 +91,14 @@ def make_generator(settings: Settings):
         usage      = resp.usage
         input_tok  = usage.prompt_tokens     if usage else 0
         output_tok = usage.completion_tokens if usage else 0
-        cost       = _estimate_cost(model, input_tok, output_tok)
+        cost       = estimate_cost(model, input_tok, output_tok)
 
-        # ── Prometheus metrics ────────────────────────────────────────────────
         rag_tokens_total.labels(model=model, token_type="input").inc(input_tok)
         rag_tokens_total.labels(model=model, token_type="output").inc(output_tok)
         rag_cost_usd_total.labels(model=model).inc(cost)
 
-        cited_ids = _extract_citations(answer, docs)
-        sources = [
-            {
-                "mal_id":          d["mal_id"],
-                "name":            d["name"],
-                "score":           d.get("score"),
-                "genres":          d.get("genres", []),
-                "relevance_score": d.get("similarity"),
-                "cited":           d["mal_id"] in cited_ids,
-            }
-            for d in docs
-        ]
+        cited_ids = extract_citations(answer, docs)
+        sources   = build_sources(docs, cited_ids)
 
         log.info(
             "generated",

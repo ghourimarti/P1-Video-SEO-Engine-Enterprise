@@ -14,8 +14,8 @@ export default function RootLayout({
 }) {
   return (
     <ClerkProvider>
-      <html lang="en">
-        <body>{children}</body>
+      <html lang="en" className="h-full">
+        <body className="h-full bg-gray-950 antialiased">{children}</body>
       </html>
     </ClerkProvider>
   );
