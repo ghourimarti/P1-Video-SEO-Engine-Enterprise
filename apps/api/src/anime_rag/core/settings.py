@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     # ── Auth (Clerk) ──────────────────────────────────────────────────────────
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""
+    # JWKS endpoint for JWT verification — set to Clerk's standard URL once you
+    # have an account. Leave empty in dev to skip verification.
+    clerk_jwks_url: str = ""
+
+    # ── Security ──────────────────────────────────────────────────────────────
+    # Presidio PII scrubbing (applies to query + answer)
+    pii_scrubbing_enabled: bool = True
+    # Guardrail prompt-injection blocking
+    guardrails_enabled: bool = True
 
     # ── Observability ─────────────────────────────────────────────────────────
     langfuse_public_key: str = ""
