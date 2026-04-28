@@ -94,7 +94,11 @@ class RAGPipeline:
         return await self._graph.ainvoke(self._initial(query, top_n, trace_id))
 
     async def run_stream(
-        self, query: str, top_n: int = 5, trace_id: Optional[str] = None
+        self,
+        query: str,
+        top_n: int = 5,
+        trace_id: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Yield fine-grained SSE events: step, token, sources, done."""
         state: RAGState = self._initial(query, top_n, trace_id)
@@ -169,7 +173,7 @@ class RAGPipeline:
             "trace_id":        trace_id,
         }
 
-        model       = self._settings.default_model
+        model       = model_override or self._settings.default_model
         full_answer = ""
         input_tok   = 0
         output_tok  = 0

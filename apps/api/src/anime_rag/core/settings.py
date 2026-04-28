@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     max_input_tokens: int = 4096
     max_output_tokens: int = 1024
 
+    # ── Cost controls ─────────────────────────────────────────────────────────
+    # Daily USD spend limits (tracked per-user and globally in Redis)
+    user_daily_budget_usd: float = 1.00
+    global_daily_budget_usd: float = 50.00
+    # Word count threshold above which the smarter (default_model) is chosen
+    cost_complex_query_words: int = 30
+
     # ── Database ─────────────────────────────────────────────────────────────
     postgres_host: str = "localhost"
     postgres_port: int = 5432

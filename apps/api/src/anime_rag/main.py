@@ -21,6 +21,7 @@ from anime_rag.core.telemetry import setup_telemetry
 from anime_rag.db.pool import create_pool, close_pool
 from anime_rag.rag.pipeline import RAGPipeline
 from anime_rag.routers import health, recommend
+from anime_rag.routers.cost import router as cost_router
 
 settings = get_settings()
 
@@ -122,3 +123,4 @@ app.mount("/metrics", make_asgi_app())
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(health.router, tags=["ops"])
 app.include_router(recommend.router, prefix=settings.api_v1_prefix, tags=["recommend"])
+app.include_router(cost_router, prefix=settings.api_v1_prefix)

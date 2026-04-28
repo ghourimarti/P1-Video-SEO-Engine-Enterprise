@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from opentelemetry import trace
 
+from anime_rag.core.cost_control import BudgetExceededError, BudgetGuard, KillSwitch, ModelRouter
 from anime_rag.core.guardrails import check as guard_check
 from anime_rag.core.metrics import (
     rag_errors_total,
@@ -68,6 +69,15 @@ async def recommend(
     if pii_count:
         log.info("pii_removed_from_query", n=pii_count)
 
+    # ── Cost controls ─────────────────────────────────────────────────────────
+    redis = request.app.state.redis
+    settings = request.app.state.pipeline._settings
+    budget  = BudgetGuard(redis, settings)
+    try:
+        await budget.check(user_id)
+    except BudgetExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc))
+
     with tracer.start_as_current_span("rag.pipeline") as span:
         span.set_attribute("rag.query_length", len(clean_query))
         span.set_attribute("rag.top_n", body.top_n)
@@ -104,7 +114,9 @@ async def recommend(
             cost_usd=round(result.get("cost_usd", 0.0), 6),
         )
 
-    # ── Audit ─────────────────────────────────────────────────────────────────
+    # ── Record spend + audit ──────────────────────────────────────────────────
+    cost = result.get("cost_usd", 0.0)
+    asyncio.create_task(budget.record(user_id, cost))
     asyncio.create_task(
         write_audit(
             pool,
@@ -113,7 +125,7 @@ async def recommend(
             model_used=model,
             input_tokens=result.get("input_tokens", 0),
             output_tokens=result.get("output_tokens", 0),
-            cost_usd=result.get("cost_usd", 0.0),
+            cost_usd=cost,
             cached=result.get("cached", False),
             pii_redacted=pii_count,
             guard_blocked=False,
@@ -176,6 +188,21 @@ async def recommend_stream(
     clean_query, pii_count = pii_scrub(body.query)
     log.info("stream_start", query=clean_query[:80], top_n=body.top_n)
 
+    # ── Cost controls ─────────────────────────────────────────────────────────
+    redis    = request.app.state.redis
+    settings = pipeline._settings
+    budget   = BudgetGuard(redis, settings)
+    try:
+        await budget.check(user_id)
+    except BudgetExceededError as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc))
+
+    ks             = KillSwitch(redis)
+    kill_active    = await ks.is_active()
+    router_m       = ModelRouter(settings)
+    model_override = router_m.select(clean_query, kill_active)
+    log.info("model_selected", model=model_override, kill_switch=kill_active)
+
     # Collect done-event data for audit after streaming completes
     done_data: dict = {}
 
@@ -183,7 +210,8 @@ async def recommend_stream(
         nonlocal done_data
         try:
             async for event in pipeline.run_stream(
-                query=clean_query, top_n=body.top_n, trace_id=trace_id
+                query=clean_query, top_n=body.top_n, trace_id=trace_id,
+                model_override=model_override,
             ):
                 if event.get("type") == "done":
                     done_data = event
@@ -196,6 +224,8 @@ async def recommend_stream(
             yield f"data: {json.dumps(error_payload)}\n\n"
         finally:
             yield "data: [DONE]\n\n"
+            stream_cost = done_data.get("cost_usd", 0.0)
+            asyncio.create_task(budget.record(user_id, stream_cost))
             asyncio.create_task(
                 write_audit(
                     pool,
@@ -204,7 +234,7 @@ async def recommend_stream(
                     model_used=done_data.get("model_used", "none"),
                     input_tokens=done_data.get("input_tokens", 0),
                     output_tokens=done_data.get("output_tokens", 0),
-                    cost_usd=done_data.get("cost_usd", 0.0),
+                    cost_usd=stream_cost,
                     cached=done_data.get("cached", False),
                     pii_redacted=pii_count,
                     guard_blocked=False,

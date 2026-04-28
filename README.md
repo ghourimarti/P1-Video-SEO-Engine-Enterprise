@@ -38,7 +38,7 @@
 | M10 | Terraform + Terragrunt IaC (EKS, RDS, ElastiCache, ECR, IAM) | ✅ Done |
 | M11 | Helm charts + ArgoCD app-of-apps + Argo Rollouts canary | ✅ Done |
 | M12 | GitHub Actions CI/CD (lint → test → eval gate → deploy) | ✅ Done |
-| M13 | Cost controls (token budgets, model routing, kill switch) | 🔜 |
+| M13 | Cost controls (token budgets, model routing, kill switch) | ✅ Done |
 | M14 | Scale validation (k6 ramp, SLOs, PgBouncer, runbooks) | 🔜 |
 | M15 | Production hardening sweep + HANDOFF.md + PORTFOLIO.md | 🔜 |
 
