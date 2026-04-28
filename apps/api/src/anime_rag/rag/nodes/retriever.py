@@ -1,7 +1,7 @@
 """Hybrid retrieval node: dense + BM25 → RRF merge → Cohere rerank.
 
-Replaces M2's dense-only retrieval.
-Dense and BM25 queries run concurrently via asyncio.gather.
+M4: reuses query_embedding from state when the rewriter did not change
+the query, avoiding a redundant OpenAI embedding API call.
 """
 
 from __future__ import annotations
@@ -34,13 +34,19 @@ def make_retriever(
         query = state.get("rewritten_query") or state["query"]
         top_k = settings.retrieval_top_k
 
-        # ── 1. Embed query ────────────────────────────────────────────────────
-        try:
-            vec = await embedder.aembed_query(query)
-            vec_arr = np.array(vec, dtype=np.float32)
-        except Exception as exc:
-            log.error("embed_query_failed", error=str(exc))
-            return {"documents": [], "grader_passed": False, "error": str(exc)}
+        # ── 1. Embed query (reuse pre-computed embedding when query unchanged) ──
+        original_query = state["query"]
+        precomputed = state.get("query_embedding")
+
+        if query == original_query and precomputed:
+            vec_arr = np.array(precomputed, dtype=np.float32)
+        else:
+            try:
+                vec = await embedder.aembed_query(query)
+                vec_arr = np.array(vec, dtype=np.float32)
+            except Exception as exc:
+                log.error("embed_query_failed", error=str(exc))
+                return {"documents": [], "grader_passed": False, "error": str(exc)}
 
         # ── 2. Dense + BM25 concurrently ─────────────────────────────────────
         dense_docs, bm25_docs = await asyncio.gather(

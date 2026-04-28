@@ -11,7 +11,7 @@ class AnimeDoc(TypedDict):
     score: Optional[float]
     genres: list[str]
     synopsis: str
-    similarity: float        # RRF score after merge; Cohere relevance score after rerank
+    similarity: float        # RRF score → Cohere relevance score after rerank
     cohere_score: Optional[float]
 
 
@@ -20,10 +20,13 @@ class RAGState(TypedDict):
     query: str
     top_n: int
 
+    # ── Embedding (computed once in cache_check, reused in retriever) ─────────
+    query_embedding: Optional[list[float]]
+
     # ── Intermediate ──────────────────────────────────────────────────────────
     rewritten_query: str
     documents: list[AnimeDoc]
-    grader_passed: bool       # False → generator returns empty answer
+    grader_passed: bool
 
     # ── Output ───────────────────────────────────────────────────────────────
     answer: str

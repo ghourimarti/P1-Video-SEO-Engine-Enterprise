@@ -1,6 +1,6 @@
 """Shared test fixtures.
 
-Unit tests mock the DB pool and pipeline so they run without infrastructure.
+Unit tests mock DB pool, Redis, and pipeline so they run without infrastructure.
 Integration tests (tests/integration/) require a running Postgres + Redis stack.
 """
 
@@ -23,8 +23,7 @@ def test_settings() -> Settings:
 
 @pytest.fixture
 def client():
-    """TestClient with DB pool and pipeline mocked out."""
-    # Patch create_pool so lifespan doesn't try to open a real connection
+    """TestClient with DB pool, Redis, and pipeline mocked out."""
     mock_pool = MagicMock()
     mock_pool.connection = MagicMock(return_value=AsyncMock(
         __aenter__=AsyncMock(return_value=AsyncMock(
@@ -36,21 +35,31 @@ def client():
     mock_pool.close = AsyncMock()
     mock_pool.open = AsyncMock()
 
+    mock_redis = AsyncMock()
+    mock_redis.ping = AsyncMock(return_value=True)
+    mock_redis.aclose = AsyncMock()
+
+    mock_cache = AsyncMock()
+    mock_cache.get_exact = AsyncMock(return_value=None)
+    mock_cache.get_semantic = AsyncMock(return_value=None)
+    mock_cache.set_response = AsyncMock()
+
     mock_pipeline = MagicMock()
     mock_pipeline.run = AsyncMock(return_value={
-        "answer": "Test answer",
-        "sources": [],
-        "model_used": "mock",
-        "input_tokens": 10,
+        "answer":        "Test answer",
+        "sources":       [],
+        "model_used":    "mock",
+        "input_tokens":  10,
         "output_tokens": 20,
-        "cost_usd": 0.0,
-        "cached": False,
-        "error": None,
+        "cost_usd":      0.0,
+        "cached":        False,
+        "error":         None,
     })
 
     with (
-        patch("anime_rag.db.pool.AsyncConnectionPool") as mock_pool_cls,
         patch("anime_rag.main.create_pool", return_value=mock_pool),
+        patch("anime_rag.main.aioredis.from_url", return_value=mock_redis),
+        patch("anime_rag.main.CacheService", return_value=mock_cache),
         patch("anime_rag.main.RAGPipeline", return_value=mock_pipeline),
         patch("anime_rag.main.OpenAIEmbeddings", return_value=MagicMock()),
     ):
@@ -63,7 +72,6 @@ def client():
 
 @pytest.fixture
 async def async_client():
-    """Async client — used in integration tests that need a real stack."""
     from anime_rag.main import app
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"

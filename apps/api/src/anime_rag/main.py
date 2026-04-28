@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 
+import redis.asyncio as aioredis
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from anime_rag.cache.service import CacheService
 from anime_rag.core.settings import get_settings
 from anime_rag.db.pool import create_pool, close_pool
 from anime_rag.rag.pipeline import RAGPipeline
@@ -19,7 +21,12 @@ from anime_rag.routers import health, recommend
 log = structlog.get_logger(__name__)
 settings = get_settings()
 
-limiter = Limiter(key_func=get_remote_address)
+# Redis-backed rate limiter — falls back to in-memory if Redis is down
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.redis_url,
+    default_limits=[f"{settings.rate_limit_per_minute}/minute"],
+)
 
 
 @asynccontextmanager
@@ -29,16 +36,33 @@ async def lifespan(app: FastAPI):
     # ── DB pool ───────────────────────────────────────────────────────────────
     app.state.db_pool = await create_pool(settings)
 
-    # ── Embedder (shared across requests — thread-safe) ───────────────────────
+    # ── Redis ─────────────────────────────────────────────────────────────────
+    app.state.redis = aioredis.from_url(
+        settings.redis_url,
+        encoding="utf-8",
+        decode_responses=True,
+    )
+    # Verify connection
+    try:
+        await app.state.redis.ping()
+        log.info("redis_connected", url=settings.redis_url)
+    except Exception as exc:
+        log.warning("redis_unavailable", error=str(exc))
+
+    # ── Cache service ─────────────────────────────────────────────────────────
+    app.state.cache = CacheService(app.state.redis, settings)
+
+    # ── Embedder ──────────────────────────────────────────────────────────────
     app.state.embedder = OpenAIEmbeddings(
         model=settings.embedding_model,
         openai_api_key=settings.openai_api_key or None,
     )
 
-    # ── RAG pipeline (compiled LangGraph graph) ───────────────────────────────
+    # ── RAG pipeline ──────────────────────────────────────────────────────────
     app.state.pipeline = RAGPipeline(
         pool=app.state.db_pool,
         embedder=app.state.embedder,
+        cache=app.state.cache,
         settings=settings,
     )
 
@@ -47,13 +71,14 @@ async def lifespan(app: FastAPI):
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
     await close_pool(app.state.db_pool)
+    await app.state.redis.aclose()
     log.info("shutdown_complete")
 
 
 app = FastAPI(
     title="Anime RAG API",
     description="Production-grade RAG for anime recommendations.",
-    version="0.2.0",
+    version="0.4.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
