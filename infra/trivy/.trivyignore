@@ -1,0 +1,5 @@
+# Trivy ignore file — add CVE IDs here to suppress false positives.
+# Format: CVE-YYYY-NNNNN  # justification | expiry: YYYY-MM-DD
+#
+# Example:
+# CVE-2023-12345  # not exploitable — affected code path not reachable | expiry: 2025-01-01

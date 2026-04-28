@@ -33,14 +33,18 @@ services:
     build:
       context: apps/api
       dockerfile: Dockerfile
-      target: development
+      # Switch to "production" for a hardened, non-root image:
+      #   DOCKER_TARGET=production docker compose up --build api
+      target: ${DOCKER_TARGET:-development}
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
       REDIS_URL: redis://redis:6379/0
+      PYTHONPATH: /app/src
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
+      # Source mounted only in development target; no-op in production
       - ./apps/api/src:/app/src:ro
       - ./packages:/packages:ro
       - ./data:/data:ro
@@ -53,7 +57,41 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
+      start_period: 20s
       retries: 5
+    # Read-only root fs in production; tmp dirs whitelisted
+    # Uncomment when using production target:
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
+    #   - /app/__pycache__
+
+  web:
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+      target: ${DOCKER_TARGET:-production}
+      args:
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+        NEXT_PUBLIC_API_URL: http://api:8000
+    environment:
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e",
+             "require('http').get('http://localhost:3000/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    profiles:
+      # Run with: docker compose --profile web up
+      # Avoids needing Clerk keys for pure-API development
+      - web
 
   langfuse-server:
     image: langfuse/langfuse:2
@@ -68,6 +106,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    profiles:
+      - observability
 
   prometheus:
     image: prom/prometheus:v2.51.0
@@ -78,6 +118,8 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=7d"
+    profiles:
+      - observability
 
   grafana:
     image: grafana/grafana:10.4.2
@@ -89,9 +131,11 @@ services:
       - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "3000:3000"
+      - "3002:3000"
     depends_on:
       - prometheus
+    profiles:
+      - observability
 
 volumes:
   pgdata:

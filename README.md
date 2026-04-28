@@ -33,8 +33,8 @@
 | M5 | structlog + OpenTelemetry + Langfuse self-hosted + Prometheus/Grafana | ✅ Done |
 | M6 | Next.js frontend + Clerk + SSE streaming + citations UI | ✅ Done |
 | M7 | Security layer (JWT, rate limiting, PII detection, prompt injection, audit log) | ✅ Done |
-| M8 | Testing + RAGAS golden eval (100 samples) + Promptfoo + k6 | 🔄 In Progress |
-| M9 | Multi-stage Dockerfiles (non-root, layer-cached, trivy scan) | 🔜 |
+| M8 | Testing + RAGAS golden eval (100 samples) + Promptfoo + k6 | ✅ Done |
+| M9 | Multi-stage Dockerfiles (non-root, layer-cached, trivy scan) | ✅ Done |
 | M10 | Terraform + Terragrunt IaC (EKS, RDS, ElastiCache, ECR, IAM) | 🔜 |
 | M11 | Helm charts + ArgoCD app-of-apps + Argo Rollouts canary | 🔜 |
 | M12 | GitHub Actions CI/CD (lint → test → eval gate → deploy) | 🔜 |

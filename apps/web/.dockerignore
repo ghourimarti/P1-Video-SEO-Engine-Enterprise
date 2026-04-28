@@ -1,0 +1,23 @@
+# Dependencies (reinstalled in Docker)
+node_modules/
+
+# Next.js build output (rebuilt in Docker)
+.next/
+out/
+
+# Environment files — never bake secrets into image
+.env
+.env.*
+!.env.example
+
+# Dev tooling
+.eslintrc*
+*.md
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.uv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tests (not needed in image)
+tests/
+
+# Alembic doesn't need to be in the final image; migrations run as a separate job
+# Keep: alembic/ is needed by the container for migrate-on-startup pattern
+# Remove only dev artifacts:
+alembic/__pycache__/
+
+# Docs / config not needed at runtime
+*.md
+*.txt
+*.cfg
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp

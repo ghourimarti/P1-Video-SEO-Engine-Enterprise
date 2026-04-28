@@ -1,0 +1,46 @@
+# Trivy security scanner configuration
+# https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
+#
+# Usage (from repo root):
+#   trivy image --config infra/trivy/trivy.yaml anime-rag-api:latest
+#   trivy image --config infra/trivy/trivy.yaml anime-rag-web:latest
+#
+# Or via Makefile:
+#   make trivy-scan
+
+# ── Scan settings ─────────────────────────────────────────────────────────────
+severity:
+  - CRITICAL
+  - HIGH
+
+# Vulnerability types to check
+vuln-type:
+  - os
+  - library
+
+# Scan targets
+scanners:
+  - vuln
+  - secret      # catch accidentally baked-in credentials
+  - misconfig   # check Dockerfile best practices
+
+# ── Exit codes ────────────────────────────────────────────────────────────────
+# Exit 1 if any CRITICAL or HIGH vulnerability found (used in CI)
+exit-code: 1
+
+# ── Output ────────────────────────────────────────────────────────────────────
+format: table   # human readable; override with --format sarif for GitHub Security tab
+
+# ── Ignorelist ────────────────────────────────────────────────────────────────
+# Add known-acceptable CVEs here with justification + expiry date
+ignorefile: infra/trivy/.trivyignore
+
+# ── Cache ─────────────────────────────────────────────────────────────────────
+cache-dir: /tmp/trivy-cache
+
+# ── Timeout ───────────────────────────────────────────────────────────────────
+timeout: 10m0s
+
+# ── Secrets detection ─────────────────────────────────────────────────────────
+secret:
+  config: infra/trivy/secret-config.yaml

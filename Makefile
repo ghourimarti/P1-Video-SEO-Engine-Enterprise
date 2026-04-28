@@ -1,8 +1,12 @@
-.PHONY: help install up down build logs lint test eval load-test seed tf-plan helm-lint alembic-upgrade alembic-revision
+.PHONY: help install up down build logs lint test eval load-test load-test-smoke \
+        seed tf-plan helm-lint alembic-upgrade alembic-revision \
+        trivy-scan trivy-scan-api trivy-scan-web drift-check promptfoo
 
 PYTHON     := uv run python
 API_DIR    := apps/api
 WEB_DIR    := apps/web
+API_IMAGE  := anime-rag-api:latest
+WEB_IMAGE  := anime-rag-web:latest
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -21,8 +25,12 @@ up: ## Start local stack (postgres + redis + api + observability)
 down: ## Tear down local stack
 	docker compose down
 
-build: ## Build all Docker images
+build: ## Build all Docker images (development target)
 	docker compose build
+
+build-prod: ## Build production Docker images (non-root, hardened)
+	docker build --target production -t $(API_IMAGE) apps/api
+	docker build --target production -t $(WEB_IMAGE) apps/web
 
 logs: ## Follow API logs
 	docker compose logs -f api
@@ -51,8 +59,11 @@ seed: ## Ingest data/anime_with_synopsis.csv into pgvector
 eval: ## Run RAGAS offline eval
 	$(PYTHON) -m eval.ragas_runner
 
-load-test: ## k6 load test (requires running stack)
+load-test-smoke: ## k6 smoke test (1 VU, 30s)
 	k6 run scripts/load_test/smoke.js
+
+load-test: ## k6 full ramp load test (0→20 VU, 15 min, SLO check)
+	k6 run scripts/load_test/full.js
 
 alembic-upgrade: ## Run Alembic migrations (requires running Postgres)
 	cd $(API_DIR) && uv run alembic upgrade head
@@ -68,3 +79,27 @@ helm-lint: ## Helm lint + dry-run template all charts
 	helm lint infra/helm/web
 	helm template anime-rag-api infra/helm/api --dry-run
 	helm template anime-rag-web infra/helm/web --dry-run
+
+# ── Security scanning ─────────────────────────────────────────────────────────
+
+trivy-scan-api: ## Trivy scan the API production image (build first with make build-prod)
+	trivy image --config infra/trivy/trivy.yaml $(API_IMAGE)
+
+trivy-scan-web: ## Trivy scan the web production image
+	trivy image --config infra/trivy/trivy.yaml $(WEB_IMAGE)
+
+trivy-scan: build-prod trivy-scan-api trivy-scan-web ## Build prod images then run Trivy on both
+
+trivy-fs: ## Trivy filesystem scan (catches secrets/misconfigs without building images)
+	trivy fs --config infra/trivy/trivy.yaml \
+	    --scanners secret,misconfig \
+	    --skip-dirs .venv,node_modules,.next \
+	    .
+
+# ── Eval ──────────────────────────────────────────────────────────────────────
+
+drift-check: ## Check embedding drift between golden set and recent audit_log queries
+	$(PYTHON) -m eval.drift_detector --report drift_report.json
+
+promptfoo: ## Run Promptfoo prompt regression suite (requires npx)
+	npx promptfoo eval --config promptfoo.yaml
