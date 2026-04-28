@@ -27,7 +27,7 @@
 |---|---|---|
 | M0 | Clean up original repo (remove blobs, add .env.example) | ✅ Done |
 | M1 | Project scaffold (this repo) | ✅ Done |
-| M2 | FastAPI backend + LCEL RAG pipeline + pgvector ingestion | 🔜 |
+| M2 | FastAPI backend + LangGraph RAG pipeline + pgvector ingestion + Alembic | ✅ Done |
 | M3 | Hybrid retrieval (BM25 + dense + RRF + Cohere reranker + query rewrite) | 🔜 |
 | M4 | Redis semantic cache + Docker Compose full stack | 🔜 |
 | M5 | structlog + OpenTelemetry + Langfuse self-hosted | 🔜 |
