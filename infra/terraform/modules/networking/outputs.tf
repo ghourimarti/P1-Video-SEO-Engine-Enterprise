@@ -1,0 +1,9 @@
+output "vpc_id"                  { value = aws_vpc.main.id }
+output "private_subnet_ids"      { value = aws_subnet.private[*].id }
+output "public_subnet_ids"       { value = aws_subnet.public[*].id }
+output "database_subnet_ids"     { value = aws_subnet.database[*].id }
+output "db_subnet_group_name"    { value = aws_db_subnet_group.main.name }
+output "redis_subnet_group_name" { value = aws_elasticache_subnet_group.main.name }
+output "api_sg_id"               { value = aws_security_group.api.id }
+output "rds_sg_id"               { value = aws_security_group.rds.id }
+output "redis_sg_id"             { value = aws_security_group.redis.id }
