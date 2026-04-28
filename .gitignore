@@ -1,0 +1,71 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+env/
+.Python
+.uv/
+
+# Node
+node_modules/
+.next/
+.turbo/
+out/
+.pnpm-store/
+
+# Logs
+logs/
+*.log
+
+# Vector / DB artefacts
+chroma_db/
+pgdata/
+redisdata/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terragrunt-cache/
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Helm
+charts/*.tgz
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Test / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+coverage.xml
+
+# k6
+results/
